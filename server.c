@@ -7,7 +7,6 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <signal.h>
-#include <time.h>
 
 #define PORT 8080
 #define MAX_CLIENTS 2
@@ -80,29 +79,21 @@ void broadcast_game_state(int sender_socket) {
 
 void check_game_start() {
     pthread_mutex_lock(&game_state.mutex);
-    
-    if (game_state.client_count == MAX_CLIENTS && !game_state.game_started) {
-        int ready_count = 0;
-        for (int i = 0; i < game_state.client_count; i++) {
-            if (game_state.clients[i].ready) {
-                ready_count++;
+    if (game_state.client_count == MAX_CLIENTS) {
+        bool all_ready = true;
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            if (!game_state.clients[i].ready) {
+                all_ready = false;
+                break;
             }
         }
         
-        if (ready_count == MAX_CLIENTS) {
+        if (all_ready && !game_state.game_started) {
             game_state.game_started = true;
-            
-            
-            char start_msg[BUFFER_SIZE];
-            
-            
-            for (int i = 0; i < game_state.client_count; i++) {
-                send(game_state.clients[i].socket, start_msg, strlen(start_msg), 0);
-                printf("Sent start message to client %d\n", game_state.clients[i].id);
-            }
+            printf("All players ready, starting game!\n");
+            broadcast_message("START", -1);
         }
     }
-    
     pthread_mutex_unlock(&game_state.mutex);
 }
 
@@ -112,14 +103,12 @@ void* handle_client(void* arg) {
     
     snprintf(buffer, BUFFER_SIZE, "ID %d", client->id);
     send(client->socket, buffer, strlen(buffer), 0);
-    printf("Sent ID %d to client\n", client->id);
     
     while (game_state.server_running) {
         int bytes_received = recv(client->socket, buffer, BUFFER_SIZE - 1, 0);
         if (bytes_received <= 0) break;
         
         buffer[bytes_received] = '\0';
-        printf("Received from client %d: %s\n", client->id, buffer);
         
         if (strncmp(buffer, "READY", 5) == 0) {
             pthread_mutex_lock(&game_state.mutex);
@@ -208,14 +197,15 @@ int main() {
             continue;
         }
         
-        pthread_mutex_lock(&game_state.mutex);
-        Client* new_client = &game_state.clients[game_state.client_count];
+        Client* new_client = malloc(sizeof(Client));
         new_client->socket = client_socket;
         new_client->id = game_state.client_count + 1;
         new_client->health = 100.0f;
         new_client->score = 0;
         new_client->ready = false;
-        game_state.client_count++;
+        
+        pthread_mutex_lock(&game_state.mutex);
+        game_state.clients[game_state.client_count++] = *new_client;
         printf("New client connected. Total clients: %d\n", game_state.client_count);
         pthread_mutex_unlock(&game_state.mutex);
         
@@ -226,5 +216,5 @@ int main() {
     
     pthread_mutex_destroy(&game_state.mutex);
     close(server_socket);
-    return 0;
+    return 0;
 }
